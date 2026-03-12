@@ -225,7 +225,7 @@ VSLMS:        w(n+1) = w(n) + μ(n) × e(n) × x(n)     ← μ(n) adapts every s
 ---
 
 ## 👤 Author
-
+>Sounak C
 > Mini Project — Signal Processing  
 > Adaptive Noise Cancellation using FFT + VSLMS  
 > Python 3.x | VS Code
