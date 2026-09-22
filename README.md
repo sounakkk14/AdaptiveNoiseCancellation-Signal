@@ -9,7 +9,7 @@
 
 ## 🌐 Live Demo
 
-**Try it in your browser: [LIVE_DEMO_URL](LIVE_DEMO_URL)**. No installation needed.
+**Try it in your browser: [sounak-vslms.streamlit.app](https://sounak-vslms.streamlit.app)**. No installation needed.
 
 Choose a synthetic or ECG test signal, adjust the VSLMS parameters, and see the
 noisy and recovered signals, FFT spectrum, convergence curves and SNR metrics
