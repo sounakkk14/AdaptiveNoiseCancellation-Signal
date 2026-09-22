@@ -156,27 +156,8 @@ def detect_interference(freqs, spectrum,
     return detected[detected >= min_freq]
 
 
-def vslms_filter(noisy, reference,
-                  mu_max=0.3, mu_min=0.001,
-                  M=128, alpha=0.999, beta=0.005):
-    N    = len(noisy)
-    w    = np.zeros(M)
-    out  = np.zeros(N)
-    err  = np.zeros(N)
-    mu_h = np.zeros(N)
-    ep   = np.var(noisy) + 1e-8
-    for n in range(M, N):
-        x  = reference[n-M:n][::-1]
-        y  = np.dot(w, x)
-        e  = noisy[n] - y
-        ep = alpha*ep + (1-alpha)*(e**2)
-        mu = np.clip(mu_max/(1.0 + beta*ep), mu_min, mu_max)
-        xp = np.dot(x, x) + 1e-8
-        w += (mu/xp)*e*x
-        out[n]  = e
-        err[n]  = e
-        mu_h[n] = mu
-    return np.real(out), err, mu_h
+# VSS-NLMS filter shared with main.py and the web app
+from adaptive_filter import vslms_filter, generate_reference, default_filter_order
 
 
 def run_processing(fs, duration, n_noise, amp,
@@ -190,20 +171,12 @@ def run_processing(fs, duration, n_noise, amp,
         freqs_fft, spectrum,
         threshold=threshold, min_freq=35)
 
-    N   = len(noisy)
-    t_r = np.arange(N) / fs
-    ref = np.zeros(N)
-    for f in detected:
-        if 0 < f < fs/2:
-            ref += np.sin(2*np.pi*f*t_r)
-    if np.max(np.abs(ref)) > 0:
-        ref = (ref / np.max(np.abs(ref)) *
-               np.std(noisy) * 0.5)
+    ref = generate_reference(noisy, detected, fs)
 
-    M = int(np.clip(fs*0.01, 64, 512))
+    M = default_filter_order(fs)
     cleaned, error, mu_hist = vslms_filter(
         noisy, ref,
-        mu_max=mu_max, mu_min=mu_min, M=M)
+        mu_max=mu_max, mu_min=mu_min, filter_order=M, fs=fs)
 
     def snr_db(clean, sig):
         sp  = np.mean(clean**2)
@@ -339,7 +312,7 @@ class NoiseCancellationGUI:
         self.var_mumax  = slider("μ Max (step size)",
                                    0.01, 0.5, 0.3, 0.01)
         self.var_mumin  = slider("μ Min (floor)",
-                                   0.001, 0.05, 0.001, 0.001)
+                                   0.001, 0.05, 0.005, 0.001)
         self.var_thresh = slider("Detection Threshold",
                                    0.05, 0.5, 0.15, 0.01)
 
@@ -706,7 +679,8 @@ class NoiseCancellationGUI:
         self.canvas.draw()
 
     def _stop_animation(self):
-        if self.anim:
+        # event_source is None once a finished animation has cleaned up
+        if self.anim and self.anim.event_source:
             self.anim.event_source.stop()
         self.anim_running = False
 

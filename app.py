@@ -105,7 +105,7 @@ with st.sidebar:
 
     st.markdown("### ⚡ VSLMS tuning")
     mu_max    = st.slider("μ max (step size)", 0.01, 0.5, 0.3, 0.01)
-    mu_min    = st.slider("μ min (floor)", 0.001, 0.05, 0.001, 0.001,
+    mu_min    = st.slider("μ min (floor)", 0.001, 0.05, 0.005, 0.001,
                           format="%.3f")
     threshold = st.slider("Detection threshold", 0.05, 0.5,
                           default_threshold, 0.01)
@@ -218,24 +218,40 @@ with tab_conv:
     M = r["filter_order"]
     idx = np.arange(M, len(r["mu_hist"]))   # skip the tap-buffer warm-up
     win = max(1, int(0.05 * fs))            # 50 ms moving average
-    resid = (r["cleaned"] - r["clean"]) ** 2
-    learning = np.convolve(resid, np.ones(win) / win, mode="same")
-    i, mu, lc = thin(idx, r["mu_hist"][M:], learning[M:])
-    col_a, col_b = st.columns(2)
-    fig = go.Figure([line(i, mu, "μ(n)", C_CLEANED)])
+
+    def learning_db(out):
+        """Residual (output - clean)^2, 50 ms average, in dB."""
+        lc = np.convolve((out - r["clean"]) ** 2, np.ones(win) / win,
+                         mode="same")
+        return 10 * np.log10(lc[M:] + 1e-12)
+
+    curves = [("VSLMS", r["cleaned"], C_CLEANED, 2)] + [
+        (f"Fixed μ = {mu:g}", out, color, 1.2)
+        for (mu, out), color in zip(r["fixed"].items(), (C_NOISY, C_CLEAN))]
+
+    i, mu = thin(idx, r["mu_hist"][M:])
+    fig = go.Figure([line(i, mu, "μ(n)", C_CLEANED, 2)])
     fig.update_layout(title="Variable step size μ(n)", showlegend=False)
     fig.update_xaxes(title_text="Sample n")
-    col_a.plotly_chart(style(fig, 380), width="stretch")
+    fig.update_yaxes(title_text="μ")
+    st.plotly_chart(style(fig, 320), width="stretch")
+    st.caption("μ starts near μ_max while the interference is uncancelled "
+               "(fast convergence), then falls towards μ_min once it has "
+               "been removed (low steady-state error).")
 
-    fig = go.Figure([line(i, lc, "Residual error", C_NOISY, 1.5)])
-    fig.update_layout(title="Learning curve: (recovered − clean)², 50 ms "
-                            "average", showlegend=False)
+    fig = go.Figure()
+    for name, out, color, w in curves:
+        ii, lc = thin(idx, learning_db(out))
+        fig.add_trace(line(ii, lc, name, color, w))
+    fig.update_layout(title="Learning curve: VSLMS vs fixed step size "
+                            "(lower is better)")
     fig.update_xaxes(title_text="Sample n")
-    col_b.plotly_chart(style(fig, 380), width="stretch")
-    st.caption("μ(n) = μ_max / (1 + β·E[e²(n)]): the step size is large "
-               "while the error is large (fast convergence) and shrinks "
-               "as the filter settles (low misadjustment). The learning "
-               "curve drops as the filter weights converge.")
+    fig.update_yaxes(title_text="Residual error (dB)")
+    st.plotly_chart(style(fig, 420), width="stretch")
+    st.caption("Residual error = (recovered − clean)², 50 ms average. A "
+               "large fixed μ converges fast but settles high; a small fixed "
+               "μ settles low but converges slowly. VSLMS gets the fast start of "
+               "the first and the low floor of the second.")
 
 # ── Metrics ──────────────────────────────────────────────────
 
@@ -250,6 +266,14 @@ with tab_metrics:
     }, index=["SNR (dB)", "MSE", "Correlation with clean signal"])
     table["Change"] = table["After filtering"] - table["Before filtering"]
     st.dataframe(table.style.format("{:.4f}"), width="stretch")
+
+    st.markdown("**SNR improvement compared with fixed step-size NLMS**")
+    compare = pd.DataFrame(
+        {"SNR improvement (dB)":
+            [m["SNR Improvement (dB)"]] + list(r["fixed_snr"].values())},
+        index=["VSLMS (variable μ)"]
+              + [f"Fixed μ = {mu:g}" for mu in r["fixed_snr"]])
+    st.dataframe(compare.style.format("{:+.2f}"), width="stretch")
 
     imp, corr = m["SNR Improvement (dB)"], m["Correlation After"]
     verdict = ("Excellent filtering: strong SNR improvement" if imp > 10
@@ -280,14 +304,24 @@ with tab_about:
    and subtracts it; the filter error *is* the cleaned signal.
 5. **Quality report**: SNR, MSE and correlation against the clean signal.
 
-#### Update rule
-$$\mu(n) = \frac{\mu_{max}}{1 + \beta\,\hat{E}[e^2(n)]},\qquad
-w(n+1) = w(n) + \frac{\mu(n)}{\lVert x(n)\rVert^2}\,e(n)\,x(n)$$
+#### Update rule: VSS-NLMS (Shin, Sayed & Song, 2004)
+$$p(n) = \alpha\,p(n-1) + (1-\alpha)\,\frac{x(n)\,e(n)}{\lVert x(n)\rVert^2},\qquad \hat{p}(n) = \frac{p(n)}{1-\alpha^{n}}$$
+$$\mu(n) = \max\!\left(\mu_{min},\ \mu_{max}\,\frac{\lVert \hat{p}(n)\rVert^2}{\lVert \hat{p}(n)\rVert^2 + C}\right)$$
+$$w(n+1) = w(n) + \frac{\mu(n)}{\lVert x(n)\rVert^2}\,e(n)\,x(n)$$
+
+$p(n)$ tracks the part of the error that is still correlated with the
+reference, which is the interference not yet cancelled. The wanted signal is
+uncorrelated with the reference, so it does not keep μ high. A rule based on
+the error power alone cannot make this distinction, because in noise
+cancellation the error *is* the cleaned signal. $\hat{p}(n)$ is a bias
+correction (as in the Adam optimiser) so that μ starts near μ_max instead of
+waiting for the average to fill. Here α = 1 − 1/fs (about one second of
+averaging) and C = 0.01.
 
 #### Improvements over the base paper
 | Base paper | This project |
 |---|---|
-| Fixed step-size LMS | Variable step size that adapts to error power |
+| Fixed step-size LMS | Variable step size driven by the residual interference |
 | Interference frequency assumed known | Detected automatically from the FFT |
 | Convergence depends on signal scale | NLMS normalisation, filter order scaled with sampling rate |
 """)

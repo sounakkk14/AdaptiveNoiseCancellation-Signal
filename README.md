@@ -29,7 +29,7 @@ It is based on the research paper:
 ### Rectifications over the base paper:
 | Base Paper Limitation | This Project's Improvement |
 |---|---|
-| Fixed step-size LMS | **Variable step-size** — μ adapts dynamically based on error power |
+| Fixed step-size LMS | **Variable step-size NLMS** — μ is driven by the residual interference (Shin–Sayed–Song VSS-NLMS) |
 | Assumed/known interference frequency | **Automatic FFT peak detection** — no prior knowledge needed |
 | Limited convergence speed | **NLMS-style normalization** — stable and fast at any sampling rate |
 
@@ -79,14 +79,21 @@ Cleaned Signal
 [SNR Quality Report + Plots]
 ```
 
-### Variable Step-Size Update Rule:
+### Variable Step-Size Update Rule (VSS-NLMS, Shin–Sayed–Song 2004):
 ```
-μ(n) = μ_max / (1 + β × E[e²(n)])
+p(n)   = α·p(n−1) + (1−α) · x(n)·e(n) / ||x(n)||²      ← error–reference correlation
+p̂(n)   = p(n) / (1 − αⁿ)                               ← bias correction
+μ(n)   = max(μ_min, μ_max · ||p̂(n)||² / (||p̂(n)||² + C))
 
 w(n+1) = w(n) + (μ(n) / ||x(n)||²) × e(n) × x(n)
 ```
-- Large error → large μ → **fast convergence**
-- Small error → small μ → **low misadjustment, stable**
+α = 1 − 1/fs (≈ 1 s averaging window), C = 0.01, μ_max = 0.3, μ_min = 0.005.
+
+- Interference not yet cancelled → e(n) correlated with reference → large μ → **fast convergence**
+- Interference cancelled → correlation ≈ 0 → μ falls to μ_min → **low misadjustment**
+- The wanted signal is *uncorrelated* with the reference, so it does not hold μ up.
+  A rule based on error power alone (e.g. μ = μ_max / (1 + β·E[e²])) cannot tell
+  them apart, because in noise cancellation the error **is** the cleaned signal.
 
 ---
 
@@ -178,11 +185,19 @@ Power-line frequency Hz [50 India / 60 US]: 50
 
 ## 📊 Sample Results
 
-| Metric | Before Filtering | After Filtering |
-|---|---|---|
-| SNR (dB) | −3.44 | ~10–15 |
-| MSE | 1.60 | ~0.05–0.2 |
-| Correlation | 0.55 | ~0.90–0.97 |
+SNR improvement (dB), fs = 1000 Hz, 10 s, default settings:
+
+| Test | Fixed μ = 0.3 | Fixed μ = 0.005 | **VSLMS** |
+|---|---|---|---|
+| Synthetic (3 interference tones) | +10.8 | +12.0 | **+20.7** |
+| ECG, power-line interference only | +14.4 | +13.9 | **+27.7** |
+| ECG, power-line + EMG + baseline wander | +4.4 | +5.4 | **+5.9** |
+
+VSLMS converges as fast as the large fixed step and reaches the same low
+error floor as the small fixed step. In the full ECG test, EMG noise and
+baseline wander are broadband / very low frequency and are not in the
+reference, so no reference-based canceller removes them. They cap the
+achievable SNR.
 
 > Results vary with sampling frequency, signal duration, and number of interference frequencies.
 
@@ -202,7 +217,7 @@ Detects interference frequencies automatically by finding peaks in the normalize
 ### `adaptive_filter.py`
 Implements the **Variable Step-Size LMS (VSLMS)** adaptive filter:
 - Synthesizes a reference signal from detected frequencies
-- Adapts step-size dynamically per sample
+- Adapts step-size per sample from the residual-interference estimate (VSS-NLMS)
 - Uses NLMS normalization for stability at high sampling rates
 - Auto-scales filter order based on `fs`
 
@@ -239,8 +254,9 @@ VSLMS:        w(n+1) = w(n) + μ(n) × e(n) × x(n)     ← μ(n) adapts every s
 ```
 
 **Why VSLMS is better:**
-- Fixed μ forces a tradeoff: large μ = fast but unstable, small μ = stable but slow
-- VSLMS resolves this — starts large (fast convergence), shrinks as signal stabilizes
+- Fixed μ forces a tradeoff: large μ = fast but high steady-state error, small μ = low error but slow
+- VSLMS resolves this: μ starts at μ_max (fast convergence) and falls to μ_min once the
+  interference is cancelled. The web app's *Convergence* tab plots all three learning curves.
 
 ---
 
@@ -248,6 +264,7 @@ VSLMS:        w(n+1) = w(n) + μ(n) × e(n) × x(n)     ← μ(n) adapts every s
 
 - S. Haykin, *Adaptive Filter Theory*, 5th ed., Pearson, 2014
 - B. Widrow & S. D. Stearns, *Adaptive Signal Processing*, Prentice Hall, 1985
+- H.-C. Shin, A. H. Sayed & W.-J. Song, "Variable step-size NLMS and affine projection algorithms," *IEEE Signal Processing Letters*, vol. 11, no. 2, pp. 132–135, 2004
 - Base Paper: *"Adaptive LMS-Based Noise Cancellation for Biomedical Signals"* (Paper 2)
 
 ---
