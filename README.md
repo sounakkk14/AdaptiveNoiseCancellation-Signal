@@ -7,6 +7,16 @@
 ![Matplotlib](https://img.shields.io/badge/Matplotlib-visualization-red)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
+## 🌐 Live Demo
+
+**Try it in your browser: [LIVE_DEMO_URL](LIVE_DEMO_URL)**. No installation needed.
+
+Choose a synthetic or ECG test signal, adjust the VSLMS parameters, and see the
+noisy and recovered signals, FFT spectrum, convergence curves and SNR metrics
+update interactively.
+
+![Web app screenshot](assets/web_app.png)
+
 ---
 
 ## 📌 Overview
@@ -30,13 +40,16 @@ It is based on the research paper:
 ```
 MINIPROJECT/
 │
-├── main.py                  # Entry point — Mode 1 (synthetic) or Mode 2 (ECG)
+├── app.py                   # Streamlit web app (live demo)
+├── vslms_core.py            # Headless VSLMS pipeline used by the web app
+├── Gui.PY                   # Tkinter desktop GUI
+├── main.py                  # CLI entry point — Mode 1 (synthetic) or Mode 2 (ECG)
 ├── signal_generator.py      # Generate synthetic multi-frequency test signals
 ├── spectral_analysis.py     # FFT and spectrogram computation
 ├── interference_detector.py # Auto-detect interference via FFT peak detection
 ├── adaptive_filter.py       # VSLMS adaptive filter (core algorithm)
 ├── visualization.py         # Signal, FFT, and recovery plots
-├── snr_calculator.py        # SNR, MSE, Correlation quality metrics
+├── snr.py                   # SNR, MSE, Correlation quality metrics
 └── ecg_test.py              # Real-world ECG noise cancellation test
 ```
 
@@ -82,10 +95,25 @@ w(n+1) = w(n) + (μ(n) / ||x(n)||²) × e(n) × x(n)
 ### Prerequisites
 
 ```bash
-pip install numpy scipy matplotlib
+pip install -r requirements.txt
 ```
 
-### Run the project
+### Run the web app locally
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+### Run the desktop GUI
+
+```bash
+python Gui.PY
+```
+
+![Desktop GUI screenshot](assets/desktop_gui.png)
+
+### Run the command-line version
 
 ```bash
 python main.py
@@ -181,7 +209,7 @@ Implements the **Variable Step-Size LMS (VSLMS)** adaptive filter:
 ### `visualization.py`
 Plots clean/noisy signals, FFT spectrum, and 3-panel recovered signal comparison.
 
-### `snr_calculator.py`
+### `snr.py`
 Computes **SNR (dB)**, **MSE**, and **Pearson Correlation** before and after filtering. Prints a formatted quality report with interpretation and renders a comparison bar chart.
 
 ### `ecg_test.py`
